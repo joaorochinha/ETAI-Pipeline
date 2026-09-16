@@ -1,4 +1,94 @@
 # Baseline Predictive Pipeline -- ETAI
+**Name:** João Rocha  
+**Student Number:** [20260600]
+
+# Logistic Regression Results
+
+The Logistic Regression model produced the following results:
+
+| Metric | Result |
+|---|---:|
+| Train Accuracy | 0.679 |
+| Test Accuracy | 0.677 |
+| Train-Test Gap | +0.001 |
+| Class 0 Precision | 0.69 |
+| Class 0 Recall | 0.74 |
+| Class 0 F1-score | 0.71 |
+| Class 1 Precision | 0.66 |
+| Class 1 Recall | 0.60 |
+| Class 1 F1-score | 0.63 |
+
+## Logistic Regression Analysis
+
+The Logistic Regression model achieved a training accuracy of approximately **67.9%** and a test accuracy of approximately **67.7%**.
+
+The difference between training and test accuracy is very small, with a gap of approximately **0.1 percentage points**. This suggests that the model does not show clear evidence of overfitting and generalises well to unseen data.
+
+For class 0, the model achieved a precision of **0.69**, recall of **0.74**, and an F1-score of **0.71**.
+
+For class 1, the model achieved a precision of **0.66**, recall of **0.60**, and an F1-score of **0.63**.
+
+The model performs slightly better for class 0 than for class 1. In particular, the lower recall for class 1 indicates that the model has more difficulty identifying positive cases.
+
+Compared with the Decision Tree, Logistic Regression generalises better to unseen data and achieves a higher test accuracy. The Decision Tree has a much larger gap between training and test accuracy, which indicates overfitting.
+
+
+# Decision Tree Results
+
+The Decision Tree produced the following results:
+
+| Metric | Result |
+|---|---:|
+| Train Accuracy | 0.829 |
+| Test Accuracy | 0.626 |
+| Train-Test Gap | +0.203 |
+| Class 0 Precision | 0.63 |
+| Class 0 Recall | 0.74 |
+| Class 0 F1-score | 0.69 |
+| Class 1 Precision | 0.61 |
+| Class 1 Recall | 0.48 |
+| Class 1 F1-score | 0.54 |
+
+## Decision Tree Analysis
+
+The Decision Tree achieved a training accuracy of approximately **82.9%**, but its test accuracy decreased to approximately **62.6%**.
+
+The difference between training and test accuracy is approximately **20.3 percentage points**. This large gap provides clear evidence of overfitting. The model performs considerably better on the data used during training than on unseen data.
+
+The model also performs differently across the two classes.
+
+For class 0, the Decision Tree achieved a precision of **0.63**, recall of **0.74**, and an F1-score of **0.69**.
+
+For class 1, precision was **0.61**, recall was only **0.48**, and the F1-score was **0.54**.
+
+The recall of 0.48 for class 1 means that the model correctly identifies only around 48% of the actual positive observations. Therefore, the model has considerable difficulty identifying class 1 cases.
+
+The results suggest that the Decision Tree is too complex in its current configuration and is fitting characteristics that are specific to the training dataset rather than patterns that generalise well to unseen data.
+
+# Logistic Regression vs Decision Tree
+
+The two models show substantially different behaviour.
+
+| Metric | Logistic Regression | Decision Tree |
+|---|---:|---:|
+| Train Accuracy | 0.679 | 0.829 |
+| Test Accuracy | 0.677 | 0.626 |
+| Train-Test Gap | ~0.001 | 0.203 |
+| Class 0 F1-score | 0.71 | 0.69 |
+| Class 1 F1-score | 0.63 | 0.54 |
+
+The Decision Tree obtains a much higher training accuracy than the Logistic Regression (**82.9% vs 67.9%**). However, this improvement does not generalise to unseen data.
+
+On the test set, Logistic Regression achieved an accuracy of **67.7%**, while the Decision Tree achieved only **62.6%**.
+
+The train-test gap is particularly important. Logistic Regression has almost no difference between its training and test performance, while the Decision Tree has a gap of approximately **20.3 percentage points**. This indicates that the Decision Tree is substantially overfitting the training data.
+
+The Logistic Regression also performs better for class 1. Its recall for class 1 is **0.60**, compared with only **0.48** for the Decision Tree. Its class 1 F1-score is also higher (**0.63 vs 0.54**).
+
+Overall, these results show that a higher training accuracy does not necessarily mean that a model is better. The Decision Tree fits the training data more closely, but its performance decreases considerably on unseen observations. In contrast, Logistic Regression has lower training accuracy but more stable performance between the training and test sets.
+
+Logistic Regression is better because it does not show overfitting and performs better on the test data.
+
 
 This is the **starting point** for your semester project: a small but *complete* predictive pipeline -- every piece a real project needs (entry point, config, data loading, preprocessing, model, evaluation), just kept as simple as possible for now.
 
