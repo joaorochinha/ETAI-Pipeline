@@ -2,6 +2,7 @@
 **Name:** João Rocha  
 **Student Number:** 20260600
 
+## Week 2 
 
 # Logistic Regression Analysis
 
@@ -49,7 +50,94 @@ Overall, these results show that a higher training accuracy does not necessarily
 
 Logistic Regression is better because it does not show overfitting and performs better on the test data.
 
+## Week 3 - Data Cleaning Analysis
 
+During Week 3, the dataset was analysed in more detail before model training.
+
+The cleaning pipeline already included:
+
+- conversion of placeholder values to missing values;
+- detection of invalid numerical values;
+- canonicalisation of categorical variables;
+- removal of duplicate observations;
+- removal of redundant columns.
+
+Additional checks were performed to investigate possible data-quality issues.
+
+### Age and age category consistency
+
+The relationship between `age` and `age_cat` was analysed.
+
+The analysis identified 12 inconsistent observations. Some contained invalid ages such as `-3` and `5`, while others contained valid ages assigned to the wrong age category.
+
+An additional cleaning rule was introduced to ensure that `age_cat` is consistent with `age` whenever a valid age is available.
+
+### COMPAS score consistency
+
+The relationship between `decile_score` and `score_text` was also analysed.
+
+After normalising different representations such as `LOW`, `low` and `Low`, 10 real inconsistencies were found.
+
+For example, some observations had a low `decile_score` but a `score_text` of `High`.
+
+A cleaning rule was introduced to make `score_text` consistent with a valid `decile_score`:
+
+- 1-4 -> Low
+- 5-7 -> Medium
+- 8-10 -> High
+
+### Duplicate observations
+
+Before cleaning, the dataset contained:
+
+- 72 exact duplicate rows;
+- 72 repeated IDs.
+
+After the cleaning process, both values were reduced to zero.
+
+### Missing values after cleaning
+
+Some values that initially appeared valid were actually placeholders or invalid values. These were converted to proper missing values during cleaning.
+
+The highest missing-value percentages after cleaning were:
+
+| Variable | Missing % |
+|---|---:|
+| priors_count | 6.97% |
+| c_charge_degree | 3.17% |
+| juv_fel_count | 3.06% |
+| age | 2.09% |
+| race | 2.00% |
+| sex | 1.50% |
+| decile_score | 0.08% |
+
+### Dataset size after cleaning
+
+| Measure | Before | After |
+|---|---:|---:|
+| Rows | 7286 | 7214 |
+| Columns | 16 | 13 |
+
+A total of 72 duplicate rows and 3 redundant columns were removed.
+
+---
+
+## Week 2 vs Week 3 Model Comparison
+
+The same two models used in Week 2 were evaluated again using the updated Week 3 pipeline.
+
+| Model | Week 2 Train Accuracy | Week 2 Test Accuracy | Week 2 Gap | Week 3 Train Accuracy | Week 3 Test Accuracy | Week 3 Gap |
+|---|---:|---:|---:|---:|---:|---:|
+| Logistic Regression | 0.679 | 0.677 | 0.001 | 0.675 | 0.657 | 0.018 |
+| Decision Tree | 0.829 | 0.626 | 0.203 | 0.792 | 0.612 | 0.180 |
+
+The Week 3 pipeline produced slightly lower test accuracy for both models.
+
+However, the Decision Tree showed a smaller train-test gap than in Week 2, decreasing from 0.203 to 0.180. This suggests that its overfitting was reduced slightly, although it still remains substantial.
+
+Logistic Regression continued to generalise better than the Decision Tree, with a much smaller gap between training and test performance.
+
+The additional cleaning steps mainly improved data consistency and data quality rather than predictive accuracy.
 
 
 

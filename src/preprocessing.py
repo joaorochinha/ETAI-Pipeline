@@ -60,7 +60,33 @@ def clean_dataset(df: pd.DataFrame, diagnostics_config: dict) -> pd.DataFrame:
 
     flag_invalid_values(out, diagnostics_config.get("validity_rules", {}))
 
+    if "age" in out.columns and "age_cat" in out.columns:
+        valid_age = out["age"].notna()
+        
+        out.loc[valid_age & (out["age"] < 25), "age_cat"] = "Less than 25"
+        out.loc[valid_age & (out["age"] >= 25) & (out["age"] < 45), "age_cat"] = "25 - 45"
+        out.loc[valid_age & (out["age"] >= 45), "age_cat"] = "Greater than 45"
+
     out = _canonicalize_categories(out, diagnostics_config.get("canonical_categories", {}), placeholder_tokens)
+
+    # Ensure score_text is consistent with a valid decile_score
+    if "decile_score" in out.columns and "score_text" in out.columns:
+        valid_score = out["decile_score"].notna()
+
+        out.loc[
+            valid_score & out["decile_score"].between(1, 4),
+            "score_text"
+        ] = "Low"
+
+        out.loc[
+            valid_score & out["decile_score"].between(5, 7),
+            "score_text"
+        ] = "Medium"
+
+        out.loc[
+            valid_score & out["decile_score"].between(8, 10),
+            "score_text"
+        ] = "High"
 
     out = out.drop_duplicates()
     id_column = diagnostics_config.get("id_column")
