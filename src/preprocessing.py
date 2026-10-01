@@ -1,191 +1,510 @@
 """
-Preprocessing -- same file, same job as week 2 (raw data in, model-ready train/test
-split out), now carrying the diagnosis-driven, leak-safe recipe this week's EDA
-notebook justifies: category cleanup, domain-rule/placeholder -> NaN conversion,
-de-duplication, mechanism-matched imputation, a leak-safe/deployable encoder/scaler
-pipeline, and the train/test split itself, all in one place instead of split across
-files -- there's exactly one obvious spot to look for "how does raw data become a
-model-ready split."
+Preprocessing utilities for the predictive pipeline.
 
-See Practical/W3/notebooks/02_preprocessing.ipynb for the full walkthrough, including
-the empirical grid that picked this week's `config.yaml`-recorded encoder/scaler pair.
-
-Two things every function here respects, on purpose:
-  - leak-safe: `clean_dataset` and `split_features_target` are target- and
-    split-independent, so they're safe to run on the whole dataset before splitting.
-    `split_train_test` is the boundary line -- everything after it (imputation,
-    encoding, scaling, inside `build_preprocessor`'s ColumnTransformer) is fit only on
-    the training fold, never on data it's about to be evaluated against.
-  - deployable from day one: every function up to (not including) the split is
-    target-column-agnostic -- `y` comes back as `None` and nothing else breaks when
-    called on label-free inference data, which never gets split at all.
+Week 4 updates:
+- cleaning is row-preserving;
+- duplicate removal is a separate training-only step;
+- a locked test set is created with split_dev_test();
+- imputation, encoding and scaling remain leak-safe inside the sklearn Pipeline;
+- TargetEncoder uses internal stratified cross-fitting.
 """
+
 import numpy as np
 import pandas as pd
+
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import OneHotEncoder, OrdinalEncoder, StandardScaler, MinMaxScaler, RobustScaler
-from category_encoders import CountEncoder, TargetEncoder
+from sklearn.model_selection import train_test_split, StratifiedKFold
+from sklearn.preprocessing import (
+    OneHotEncoder,
+    OrdinalEncoder,
+    TargetEncoder,
+    StandardScaler,
+    MinMaxScaler,
+    RobustScaler,
+)
 
-from src.data_diagnostics import flag_invalid_values
+from category_encoders import CountEncoder
 
 
-def _canonicalize_categories(df: pd.DataFrame, columns_and_maps: dict, placeholder_tokens: set) -> pd.DataFrame:
+# ---------------------------------------------------------------------
+# Cleaning
+# ---------------------------------------------------------------------
+
+def _canonicalize_categories(
+    df: pd.DataFrame,
+    columns_and_maps: dict,
+    placeholder_tokens: set
+) -> pd.DataFrame:
+    """
+    Standardises categorical values using the mappings defined in config.yaml.
+    """
     out = df.copy()
+
     for col, mapping in columns_and_maps.items():
         if col not in out.columns:
             continue
+
         cleaned = out[col].astype(str).str.strip()
         lowered = cleaned.str.lower()
+
         out[col] = lowered.map(mapping).fillna(cleaned)
-        out.loc[out[col].astype(str).str.strip().isin(placeholder_tokens), col] = np.nan
+
+        out.loc[
+            out[col].astype(str).str.strip().isin(placeholder_tokens),
+            col
+        ] = np.nan
+
     return out
 
 
-def clean_dataset(df: pd.DataFrame, diagnostics_config: dict) -> pd.DataFrame:
+def flag_invalid_values(df: pd.DataFrame, rules: dict) -> pd.DataFrame:
     """
-    Applies this week's diagnosis: category cleanup, domain-rule/placeholder -> NaN
-    conversion, de-duplication, and redundant-column removal. Target-agnostic -- safe
-    to call on label-free inference data, since none of this depends on a target column.
+    Applies domain validity rules defined in config.yaml.
+
+    Values outside the permitted range are converted to NaN in place.
+
+    Example:
+        age = -3
+        decile_score = 15
+
+    Returns a report containing the number of violations for each column.
+    """
+    report_rows = []
+
+    for column, bounds in rules.items():
+
+        if column not in df.columns:
+            continue
+
+        numeric = pd.to_numeric(
+            df[column],
+            errors="coerce"
+        )
+
+        lower_ok = (
+            numeric >= bounds["min"]
+            if "min" in bounds
+            else pd.Series(True, index=numeric.index)
+        )
+
+        upper_ok = (
+            numeric <= bounds["max"]
+            if "max" in bounds
+            else pd.Series(True, index=numeric.index)
+        )
+
+        violations = numeric.notna() & ~(lower_ok & upper_ok)
+
+        report_rows.append({
+            "column": column,
+            "rule": bounds,
+            "violations": int(violations.sum())
+        })
+
+        df.loc[violations, column] = np.nan
+
+    return pd.DataFrame(report_rows)
+
+
+def clean_dataset(
+    df: pd.DataFrame,
+    diagnostics_config: dict
+) -> pd.DataFrame:
+    """
+    Applies diagnosis-driven cleaning:
+
+    - placeholder values -> NaN;
+    - numeric text columns -> numeric;
+    - impossible values -> NaN;
+    - categorical values are standardised;
+    - redundant columns are removed.
+
+    Important:
+    This function is row-preserving. Every input row comes out in the
+    same order.
+
+    Duplicate removal is handled separately by drop_duplicate_rows().
     """
     out = df.copy()
-    placeholder_tokens = set(diagnostics_config.get("placeholder_tokens", []))
 
-    # numeric columns that load as text purely because of a placeholder token
+    placeholder_tokens = set(
+        diagnostics_config.get("placeholder_tokens", [])
+    )
+
+    # Convert numeric columns stored as text
     for col in diagnostics_config.get("numeric_text_columns", []):
+
         if col in out.columns:
-            out[col] = pd.to_numeric(out[col].replace(list(placeholder_tokens), np.nan), errors="coerce")
 
-    flag_invalid_values(out, diagnostics_config.get("validity_rules", {}))
+            out[col] = pd.to_numeric(
+                out[col].replace(
+                    list(placeholder_tokens),
+                    np.nan
+                ),
+                errors="coerce"
+            )
 
-    if "age" in out.columns and "age_cat" in out.columns:
-        valid_age = out["age"].notna()
-        
-        out.loc[valid_age & (out["age"] < 25), "age_cat"] = "Less than 25"
-        out.loc[valid_age & (out["age"] >= 25) & (out["age"] < 45), "age_cat"] = "25 - 45"
-        out.loc[valid_age & (out["age"] >= 45), "age_cat"] = "Greater than 45"
+    # Convert impossible values to NaN
+    flag_invalid_values(
+        out,
+        diagnostics_config.get("validity_rules", {})
+    )
 
-    out = _canonicalize_categories(out, diagnostics_config.get("canonical_categories", {}), placeholder_tokens)
+    # Standardise categorical values
+    out = _canonicalize_categories(
+        out,
+        diagnostics_config.get(
+            "canonical_categories",
+            {}
+        ),
+        placeholder_tokens
+    )
 
-    # Ensure score_text is consistent with a valid decile_score
-    if "decile_score" in out.columns and "score_text" in out.columns:
-        valid_score = out["decile_score"].notna()
+    # Remove redundant columns
+    columns_to_drop = [
+        c
+        for c in diagnostics_config.get(
+            "redundant_columns",
+            []
+        )
+        if c in out.columns
+    ]
 
-        out.loc[
-            valid_score & out["decile_score"].between(1, 4),
-            "score_text"
-        ] = "Low"
-
-        out.loc[
-            valid_score & out["decile_score"].between(5, 7),
-            "score_text"
-        ] = "Medium"
-
-        out.loc[
-            valid_score & out["decile_score"].between(8, 10),
-            "score_text"
-        ] = "High"
-
-    out = out.drop_duplicates()
-    id_column = diagnostics_config.get("id_column")
-    if id_column and id_column in out.columns:
-        out = out.drop_duplicates(subset=id_column, keep="first")
-
-    columns_to_drop = [c for c in diagnostics_config.get("redundant_columns", []) if c in out.columns]
-    out = out.drop(columns=columns_to_drop)
+    out = out.drop(
+        columns=columns_to_drop
+    )
 
     return out
 
 
-def add_missingness_indicators(df: pd.DataFrame, mnar_indicator_sources: list) -> pd.DataFrame:
-    """Adds a `<col>_was_missing` flag for each MNAR-diagnosed column, before that
-    column gets imputed -- so a model can still see the pattern even though the fill
-    value itself (median/mode) can't carry it. Target-agnostic."""
-    out = df.copy()
-    for col in mnar_indicator_sources:
-        if col in out.columns:
-            out[f"{col}_was_missing"] = out[col].isna().astype(int)
-    return out
-
-
-def split_features_target(df: pd.DataFrame, data_config: dict, mnar_indicator_sources: list):
+def drop_duplicate_rows(
+    df: pd.DataFrame,
+    id_column: str = None
+) -> pd.DataFrame:
     """
-    Returns (X, y, extras). `y` is `None` and `extras` has no target column when called
-    on label-free inference data -- nothing downstream requires the target to be present.
+    TRAINING DATA ONLY.
+
+    Removes:
+
+    1. exact duplicate rows;
+    2. repeated identifiers, keeping the first observation.
+
+    This must happen before split_dev_test() so that the same person
+    cannot appear in both the development and locked test sets.
+
+    Do not apply this function to future prediction data, because every
+    input row there requires a prediction.
+    """
+    out = df.drop_duplicates()
+
+    if id_column and id_column in out.columns:
+
+        out = out.drop_duplicates(
+            subset=id_column,
+            keep="first"
+        )
+
+    return out
+
+
+# ---------------------------------------------------------------------
+# Features / target
+# ---------------------------------------------------------------------
+
+def add_missingness_indicators(
+    df: pd.DataFrame,
+    mnar_indicator_sources: list
+) -> pd.DataFrame:
+    """
+    Adds a <column>_was_missing indicator for each configured MNAR column.
+
+    The indicator is created before imputation so that the model can
+    retain information about whether the original value was missing.
+    """
+    out = df.copy()
+
+    for col in mnar_indicator_sources:
+
+        if col in out.columns:
+
+            out[f"{col}_was_missing"] = (
+                out[col].isna().astype(int)
+            )
+
+    return out
+
+
+def split_features_target(
+    df: pd.DataFrame,
+    data_config: dict,
+    mnar_indicator_sources: list
+):
+    """
+    Separates the model features, target and extra audit columns.
+
+    Returns:
+        X
+        y
+        extras
+
+    race and score_text are kept in extras for fairness/audit purposes
+    rather than being used as model features.
     """
     target = data_config["target"]
-    sensitive_attr = data_config["sensitive_attr"]
-    drop_columns = data_config.get("drop_columns", [])
 
-    df = add_missingness_indicators(df, mnar_indicator_sources)
-    y = df[target] if target in df.columns else None
+    sensitive_attr = data_config[
+        "sensitive_attr"
+    ]
 
-    extras_cols = [c for c in [sensitive_attr, "score_text"] if c in df.columns]
-    extras = df[extras_cols].copy() if extras_cols else None
+    drop_columns = data_config.get(
+        "drop_columns",
+        []
+    )
 
-    always_drop = set(drop_columns) | {target, sensitive_attr}
-    feature_cols = [c for c in df.columns if c not in always_drop]
+    df = add_missingness_indicators(
+        df,
+        mnar_indicator_sources
+    )
+
+    y = (
+        df[target]
+        if target in df.columns
+        else None
+    )
+
+    extras_cols = [
+        c
+        for c in [
+            sensitive_attr,
+            "score_text"
+        ]
+        if c in df.columns
+    ]
+
+    extras = (
+        df[extras_cols].copy()
+        if extras_cols
+        else None
+    )
+
+    always_drop = (
+        set(drop_columns)
+        | {target, sensitive_attr}
+    )
+
+    feature_cols = [
+        c
+        for c in df.columns
+        if c not in always_drop
+    ]
+
     X = df[feature_cols]
+
     return X, y, extras
 
 
-_SCALERS = {"none": "passthrough", "standard": StandardScaler, "minmax": MinMaxScaler, "robust": RobustScaler}
-_ENCODERS = {
-    "onehot": lambda: OneHotEncoder(handle_unknown="ignore", sparse_output=False),
-    "ordinal": lambda: OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1),
-    "count": lambda: CountEncoder(handle_unknown=0, handle_missing=0),
-    "target": lambda: TargetEncoder(handle_unknown="value", handle_missing="value"),
+# ---------------------------------------------------------------------
+# Development / locked test split
+# ---------------------------------------------------------------------
+
+def split_dev_test(
+    X,
+    y,
+    extras,
+    test_size: float,
+    random_state: int
+):
+    """
+    Sets aside the final locked test set.
+
+    The development set is the data that may be used for training,
+    cross-validation and model comparison.
+
+    The locked test set must not be used to choose models or
+    preprocessing decisions.
+    """
+    (
+        X_dev,
+        X_test,
+        y_dev,
+        y_test,
+        extras_dev,
+        extras_test,
+    ) = train_test_split(
+        X,
+        y,
+        extras,
+        test_size=test_size,
+        random_state=random_state,
+        stratify=y
+    )
+
+    return (
+        X_dev,
+        X_test,
+        y_dev,
+        y_test,
+        extras_dev,
+        extras_test
+    )
+
+
+# ---------------------------------------------------------------------
+# Preprocessing
+# ---------------------------------------------------------------------
+
+_SCALERS = {
+    "none": "passthrough",
+    "standard": StandardScaler,
+    "minmax": MinMaxScaler,
+    "robust": RobustScaler,
 }
 
 
-def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
-    """
-    Factory: builds a leak-safe ColumnTransformer for this week's chosen encoder/scaler
-    pair -- read from `config.yaml`'s `preprocessing` section (found by the empirical
-    grid in 02_preprocessing.ipynb, not hardcoded here). Every encoder tolerates unseen
-    categories at transform time; fit happens on the training fold only, via the
-    surrounding sklearn Pipeline's own fit/transform discipline.
-    """
-    encoder_name = preprocessing_config["encoder"]
-    scaler_name = preprocessing_config["scaler"]
-    numeric_features = preprocessing_config["numeric_features"]
-    categorical_features = preprocessing_config["categorical_features"]
-    mnar_indicator_sources = preprocessing_config.get("mnar_indicator_sources", [])
-    imputation = preprocessing_config.get("imputation", {})
+_ENCODERS = {
 
-    scaler_factory = _SCALERS[scaler_name]
-    scaler = scaler_factory() if callable(scaler_factory) else scaler_factory
-    encoder = _ENCODERS[encoder_name]()
+    "onehot": lambda seed: OneHotEncoder(
+        handle_unknown="ignore",
+        sparse_output=False
+    ),
 
+    "ordinal": lambda seed: OrdinalEncoder(
+        handle_unknown="use_encoded_value",
+        unknown_value=-1
+    ),
+
+    "count": lambda seed: CountEncoder(
+        handle_unknown=0,
+        handle_missing=0
+    ),
+
+    "target": lambda seed: TargetEncoder(
+        target_type="binary",
+        cv=StratifiedKFold(
+            5,
+            shuffle=True,
+            random_state=seed
+        )
+    ),
+}
+
+
+def build_preprocessor(
+    preprocessing_config: dict
+) -> ColumnTransformer:
+    """
+    Builds the leak-safe preprocessing ColumnTransformer.
+
+    The encoder and scaler are selected from config.yaml.
+
+    Nothing is fitted here. This object is later placed inside the
+    sklearn model Pipeline, so imputation, encoding and scaling are
+    learned only from the relevant training data.
+    """
+    encoder_name = preprocessing_config[
+        "encoder"
+    ]
+
+    scaler_name = preprocessing_config[
+        "scaler"
+    ]
+
+    numeric_features = preprocessing_config[
+        "numeric_features"
+    ]
+
+    categorical_features = preprocessing_config[
+        "categorical_features"
+    ]
+
+    mnar_indicator_sources = (
+        preprocessing_config.get(
+            "mnar_indicator_sources",
+            []
+        )
+    )
+
+    imputation = preprocessing_config.get(
+        "imputation",
+        {}
+    )
+
+    # Scaler
+    scaler_factory = _SCALERS[
+        scaler_name
+    ]
+
+    scaler = (
+        scaler_factory()
+        if callable(scaler_factory)
+        else scaler_factory
+    )
+
+    # Encoder
+    encoder = _ENCODERS[
+        encoder_name
+    ](
+        preprocessing_config.get(
+            "random_state"
+        )
+    )
+
+    # Numeric pipeline
     numeric_pipeline = Pipeline([
-        ("impute", SimpleImputer(strategy=imputation.get("numeric_strategy", "median"))),
-        ("scale", scaler),
-    ])
-    categorical_pipeline = Pipeline([
-        ("impute", SimpleImputer(strategy=imputation.get("categorical_strategy", "most_frequent"))),
-        ("encode", encoder),
+        (
+            "impute",
+            SimpleImputer(
+                strategy=imputation.get(
+                    "numeric_strategy",
+                    "median"
+                )
+            )
+        ),
+        (
+            "scale",
+            scaler
+        ),
     ])
 
-    indicator_cols = [f"{c}_was_missing" for c in mnar_indicator_sources]
+    # Categorical pipeline
+    categorical_pipeline = Pipeline([
+        (
+            "impute",
+            SimpleImputer(
+                strategy=imputation.get(
+                    "categorical_strategy",
+                    "most_frequent"
+                )
+            )
+        ),
+        (
+            "encode",
+            encoder
+        ),
+    ])
+
+    # Missingness indicators
+    indicator_cols = [
+        f"{c}_was_missing"
+        for c in mnar_indicator_sources
+    ]
 
     return ColumnTransformer([
-        ("numeric", numeric_pipeline, numeric_features),
-        ("categorical", categorical_pipeline, categorical_features),
-        ("indicators", "passthrough", indicator_cols),
+        (
+            "numeric",
+            numeric_pipeline,
+            numeric_features
+        ),
+        (
+            "categorical",
+            categorical_pipeline,
+            categorical_features
+        ),
+        (
+            "indicators",
+            "passthrough",
+            indicator_cols
+        ),
     ])
-
-
-def split_train_test(X, y, extras, test_size: float, random_state: int):
-    """
-    Stratified split of X, y, and the extras frame (race/score_text, kept aside for the
-    fairness report) together, so all three stay row-aligned. This is the leak-safe
-    boundary line -- everything downstream (imputation, encoding, scaling, inside
-    build_preprocessor's ColumnTransformer) may only ever be fit on X_train, never on
-    X_test or the full dataset.
-    """
-    X_train, X_test, y_train, y_test, extras_train, extras_test = train_test_split(
-        X, y, extras, test_size=test_size, random_state=random_state, stratify=y
-    )
-    return X_train, X_test, y_train, y_test, extras_train, extras_test
