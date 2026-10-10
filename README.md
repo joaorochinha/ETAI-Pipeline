@@ -1,1033 +1,180 @@
 # Baseline Predictive Pipeline -- ETAI
 
-**Name:** João Rocha  
-**Student Number:** 20260600
+This is the **starting point** for your semester project: a small but *complete* predictive pipeline -- every piece a real project needs (entry point, config, data loading, preprocessing, model, evaluation), just kept as simple as possible for now.
 
----
+The task: predict two-year recidivism using ProPublica's COMPAS
+dataset -- the data behind a real 2016 investigation into a risk-
+assessment algorithm actually used by US courts to help inform bail and sentencing decisions. See `data/README.md` for the full problem description and a complete data dictionary before you start.
 
-# Week 2
+It has some **deliberately weak spots**. Part of your work this
+semester is finding them and making them better -- see the pipeline progress table below, which tracks what changes and why as the weeks
+go on.
 
-## Logistic Regression Analysis
+## Project structure
 
-The Logistic Regression model achieved a training accuracy of approximately **67.9%** and a test accuracy of approximately **67.7%**.
-
-The difference between training and test accuracy was very small, with a gap of approximately **0.1 percentage points**. This suggested that the model did not show clear evidence of overfitting and generalised well to unseen data.
-
-For class 0, the model achieved:
-
-- Precision: **0.69**
-- Recall: **0.74**
-- F1-score: **0.71**
-
-For class 1, the model achieved:
-
-- Precision: **0.66**
-- Recall: **0.60**
-- F1-score: **0.63**
-
-The model performed slightly better for class 0 than for class 1. In particular, the lower recall for class 1 showed that the model had more difficulty identifying positive cases.
-
-Compared with the Decision Tree, Logistic Regression generalised better to unseen data and achieved a higher test accuracy.
-
----
-
-## Decision Tree Analysis
-
-The Decision Tree achieved a training accuracy of approximately **82.9%**, while its test accuracy was approximately **62.6%**.
-
-The difference between training and test accuracy was approximately **20.3 percentage points**.
-
-This large gap provided clear evidence of overfitting. The model performed considerably better on the data used during training than on unseen data.
-
-For class 0, the model achieved:
-
-- Precision: **0.63**
-- Recall: **0.74**
-- F1-score: **0.69**
-
-For class 1, the model achieved:
-
-- Precision: **0.61**
-- Recall: **0.48**
-- F1-score: **0.54**
-
-The recall of 0.48 for class 1 means that the model correctly identified only around 48% of the actual positive observations.
-
-The results suggested that the Decision Tree was too complex in its current configuration and was fitting characteristics specific to the training dataset rather than patterns that generalised well to unseen data.
-
----
-
-## Logistic Regression vs Decision Tree
-
-The two models showed substantially different behaviour.
-
-The Decision Tree obtained a much higher training accuracy than Logistic Regression:
-
-- Decision Tree: **82.9%**
-- Logistic Regression: **67.9%**
-
-However, this improvement did not generalise to unseen data.
-
-On the test set:
-
-- Logistic Regression: **67.7%**
-- Decision Tree: **62.6%**
-
-The train-test gap was particularly important.
-
-- Logistic Regression gap: approximately **0.1 percentage points**
-- Decision Tree gap: approximately **20.3 percentage points**
-
-This indicated that the Decision Tree substantially overfit the training data.
-
-Logistic Regression also performed better for class 1:
-
-- Logistic Regression recall: **0.60**
-- Decision Tree recall: **0.48**
-
-Its class 1 F1-score was also higher:
-
-- Logistic Regression: **0.63**
-- Decision Tree: **0.54**
-
-Overall, these results showed that higher training accuracy does not necessarily mean that a model is better.
-
-The Decision Tree fitted the training data more closely, but its performance decreased considerably on unseen observations.
-
-Logistic Regression had lower training accuracy but much more stable performance between the training and test sets.
-
----
-
-# Week 3 - Data Cleaning and EDA
-
-During Week 3, the dataset was analysed in more detail before model training.
-
-The objective was to diagnose data-quality problems before deciding how they should be handled in the predictive pipeline.
-
-The analysis investigated:
-
-- placeholder values;
-- invalid numerical values;
-- missing-value mechanisms;
-- inconsistent categorical values;
-- duplicate observations;
-- redundant variables;
-- multicollinearity.
-
----
-
-## Invalid and Missing Values
-
-Some observations contained values that were technically present in the dataset but were not valid values.
-
-Examples included:
-
-- invalid ages;
-- invalid COMPAS decile scores;
-- negative juvenile counts;
-- unrealistic prior-offence counts;
-- placeholder strings such as `-`, `?`, `NA`, and `n/a`.
-
-These values were converted to proper missing values (`NaN`) before imputation.
-
-The main validity rules used were:
-
-| Variable | Rule |
-|---|---|
-| `age` | 18 to 100 |
-| `decile_score` | 1 to 10 |
-| `juv_fel_count` | >= 0 |
-| `priors_count` | 0 to 60 |
-
----
-
-## Missingness Mechanisms
-
-The Week 3 exploratory analysis investigated whether missingness appeared to be MCAR or related to other variables.
-
-The resulting preprocessing decisions were stored in `config.yaml`.
-
-The current configuration uses:
-
-| Variable | Strategy |
-|---|---|
-| `age` | median imputation |
-| `juv_fel_count` | median imputation |
-| `priors_count` | median imputation + missingness indicator |
-| `c_charge_degree` | most-frequent imputation + missingness indicator |
-| `sex` | most-frequent imputation |
-
-The missingness indicators used by the pipeline are:
-
-```text
-priors_count_was_missing
-c_charge_degree_was_missing
 ```
-
-These indicators are created before imputation so that the model can still use information about whether the original value was missing.
-
----
-
-## Age and Age Category Investigation
-
-The relationship between `age` and `age_cat` was analysed as an additional data-quality check.
-
-The investigation found a small number of inconsistent observations, including invalid age values and cases where a valid numerical age did not correspond to the expected age category.
-
-This was useful for understanding the quality of the dataset.
-
-However, the final Week 4 `clean_dataset()` implementation follows the generic configuration-driven cleaning recipe and does not include a hardcoded rule that reconstructs `age_cat` from `age`.
-
----
-
-## COMPAS Score Consistency Investigation
-
-The relationship between `decile_score` and `score_text` was also investigated.
-
-Different representations such as:
-
-```text
-LOW
-low
-Low
-```
-
-were identified and categorical spellings were standardised.
-
-The analysis also investigated whether `score_text` was consistent with `decile_score`.
-
-This was treated as an exploratory data-quality investigation.
-
-The current generic cleaning pipeline canonicalises category spellings using the mappings stored in `config.yaml`.
-
----
-
-## Duplicate Observations
-
-Before duplicate removal, the dataset contained:
-
-- **72 exact duplicate rows**
-- **72 repeated IDs**
-
-From Week 4 onward, duplicate removal is deliberately separated from general cleaning.
-
-`clean_dataset()` is row-preserving:
-
-```text
-same rows in
-same rows out
-same order
-```
-
-This makes the function safe to apply to future prediction data, where every input row requires a prediction.
-
-Duplicate removal is handled separately by:
-
-```python
-drop_duplicate_rows()
-```
-
-This function is applied only to the labelled dataset before the development/test split.
-
-After duplicate removal:
-
-- Rows: **7286 -> 7214**
-- Duplicate observations removed: **72**
-
----
-
-## Missing Values After Cleaning
-
-After invalid values and placeholders were converted to `NaN`, the main missing-value percentages were approximately:
-
-| Variable | Missing % |
-|---|---:|
-| `priors_count` | 6.97% |
-| `c_charge_degree` | 3.17% |
-| `juv_fel_count` | 3.06% |
-| `age` | 2.09% |
-| `race` | 2.00% |
-| `sex` | 1.50% |
-| `decile_score` | 0.08% |
-
-These missing values are not simply deleted.
-
-Instead, imputation is performed inside the sklearn preprocessing pipeline so that fitted values are learned only from the appropriate training data.
-
----
-
-## Redundant Variables
-
-Three variables were identified as redundant during the Week 3 analysis:
-
-```text
-prior_offenses
-age_in_months
-juvenile_total
-```
-
-These variables are removed before modelling.
-
-The purpose is to avoid keeping variables that duplicate information already represented elsewhere in the dataset.
-
----
-
-# Week 2 vs Week 3 Model Comparison
-
-The same two models were evaluated again after the Week 3 data-quality and preprocessing changes.
-
-| Model | Week 2 Train | Week 2 Test | Week 2 Gap | Week 3 Train | Week 3 Test | Week 3 Gap |
-|---|---:|---:|---:|---:|---:|---:|
-| Logistic Regression | 0.679 | 0.677 | 0.001 | 0.675 | 0.657 | 0.018 |
-| Decision Tree | 0.829 | 0.626 | 0.203 | 0.792 | 0.612 | 0.180 |
-
-The Week 3 pipeline produced slightly lower test accuracy for both models.
-
-However, the Decision Tree showed a smaller train-test gap than in Week 2.
-
-Its gap decreased from:
-
-```text
-0.203 -> 0.180
-```
-
-This suggested that its overfitting was reduced slightly, although it remained substantial.
-
-Logistic Regression continued to generalise better than the Decision Tree.
-
-The objective of the additional cleaning was primarily to improve data consistency and preprocessing quality rather than to guarantee an increase in predictive accuracy.
-
----
-
-# Week 4 - Leak-Safe Preprocessing Recipe
-
-Week 4 reorganised the preprocessing pipeline so that the distinction between:
-
-1. stateless cleaning;
-2. training-data-only decisions;
-3. fitted preprocessing operations;
-
-is explicit.
-
-The main rule is:
-
-> Held-out observations must behave like future unseen observations.
-
-Therefore, any operation that learns information from data must only be fitted using the appropriate training observations.
-
----
-
-## Row-Preserving Cleaning
-
-`clean_dataset()` now performs only stateless cleaning operations.
-
-These include:
-
-- conversion of placeholders to `NaN`;
-- conversion of numeric text columns;
-- invalid-value detection;
-- categorical canonicalisation;
-- removal of redundant columns.
-
-Importantly:
-
-```text
-clean_dataset():
-rows in = rows out
-```
-
-Duplicate observations are no longer removed inside this function.
-
----
-
-## Training-Only Duplicate Removal
-
-Duplicate removal was moved into:
-
-```python
-drop_duplicate_rows()
-```
-
-This operation happens before the development/test split.
-
-The objective is to prevent the same observation or person from appearing in both the development data and the locked test set.
-
-It is not applied to future prediction data because every incoming row must receive a prediction.
-
----
-
-## Development and Locked Test Set
-
-The previous:
-
-```python
-split_train_test()
-```
-
-was replaced with:
-
-```python
-split_dev_test()
-```
-
-The dataset is divided into:
-
-- **80% development set**
-- **20% locked test set**
-
-using:
-
-```yaml
-split:
-  test_size: 0.2
-  random_state: 42
-```
-
-The development set is the data available for:
-
-- training;
-- model comparison;
-- cross-validation;
-- hyperparameter tuning.
-
-The locked test set should not be used to make modelling or preprocessing decisions.
-
-It represents the final unseen evaluation data.
-
----
-
-## Missingness Indicators
-
-Before imputation, the pipeline creates missingness flags for variables diagnosed as requiring them.
-
-The current configuration is:
-
-```yaml
-mnar_indicator_sources:
-  - priors_count
-  - c_charge_degree
-```
-
-This produces:
-
-```text
-priors_count_was_missing
-c_charge_degree_was_missing
-```
-
-The flags remain available after the original missing values are imputed.
-
----
-
-## Imputation
-
-Imputation is performed inside the sklearn `Pipeline`.
-
-The current strategies are:
-
-```yaml
-imputation:
-  numeric_strategy: "median"
-  categorical_strategy: "most_frequent"
-```
-
-This is leak-safe because the imputation values are fitted only on the training data available to that fitting operation.
-
----
-
-## Categorical Encoding
-
-The current categorical encoder is:
-
-```yaml
-encoder: "target"
-```
-
-The pipeline uses scikit-learn's `TargetEncoder`.
-
-The encoder uses internal stratified cross-fitting:
-
-```python
-StratifiedKFold(
-    5,
-    shuffle=True,
-    random_state=42
-)
-```
-
-The categorical features are:
-
-```text
-sex
-age_cat
-c_charge_degree
-```
-
-Target encoding produces a compact numeric representation of categorical variables.
-
-Alternative encoders remain available in the code:
-
-```text
-onehot
-ordinal
-count
-target
-```
-
----
-
-## Scaling
-
-The current scaler is:
-
-```yaml
-scaler: "robust"
-```
-
-`RobustScaler` uses the median and interquartile range.
-
-This is useful for numerical count variables with extreme observations because extreme values have less influence on the scale than they would with mean/standard-deviation scaling.
-
-Alternative scalers remain available:
-
-```text
-none
-standard
-minmax
-robust
-```
-
-The current preprocessing recipe is therefore:
-
-```text
-Target Encoding
-+
-Robust Scaling
-```
-
----
-
-## Model Construction
-
-The Week 4 `model.py` supports four classifiers:
-
-```text
-dummy
-logistic_regression
-decision_tree
-random_forest
-```
-
-The model is selected through `config.yaml`.
-
-For example:
-
-```yaml
-model:
-  type: "logistic_regression"
-  params:
-    max_iter: 2000
-```
-
-This allows different models to be tested without changing the Python source code.
-
----
-
-# Week 4 Model Results
-
-After implementing the Week 4 preprocessing pipeline, Logistic Regression and Decision Tree were evaluated again.
-
-The current evaluator still prints the development-set score as `Train accuracy`, because the model is fitted on the complete development set before evaluation.
-
-| Model | Development Accuracy | Locked Test Accuracy | Gap |
-|---|---:|---:|---:|
-| Logistic Regression | 0.676 | **0.658** | **0.018** |
-| Decision Tree | 0.687 | 0.602 | 0.085 |
-
----
-
-## Logistic Regression
-
-Current results:
-
-```text
-Development accuracy: 0.676
-Test accuracy:        0.658
-Gap:                  0.018
-```
-
-Classification report on the locked test set:
-
-| Class | Precision | Recall | F1-score |
-|---|---:|---:|---:|
-| 0 | 0.65 | 0.80 | 0.72 |
-| 1 | 0.66 | 0.48 | 0.56 |
-
-The development-test gap is small.
-
-This indicates relatively stable performance between the data used to fit the pipeline and the locked test observations.
-
-The model still has more difficulty identifying class 1 than class 0, particularly in recall.
-
----
-
-## Decision Tree
-
-Current results:
-
-```text
-Development accuracy: 0.687
-Test accuracy:        0.602
-Gap:                  0.085
-```
-
-Classification report on the locked test set:
-
-| Class | Precision | Recall | F1-score |
-|---|---:|---:|---:|
-| 0 | 0.62 | 0.72 | 0.66 |
-| 1 | 0.57 | 0.46 | 0.51 |
-
-The Decision Tree has a higher development accuracy than Logistic Regression, but lower performance on the locked test set.
-
-It also has a larger development-test gap.
-
-This indicates that the Decision Tree continues to show more evidence of overfitting than Logistic Regression.
-
----
-
-## Current Model Comparison
-
-| Model | Development | Test | Gap |
-|---|---:|---:|---:|
-| Logistic Regression | 0.676 | **0.658** | **0.018** |
-| Decision Tree | **0.687** | 0.602 | 0.085 |
-
-Based on these results, Logistic Regression remains the strongest of the two currently evaluated models because:
-
-- it achieves higher locked-test accuracy;
-- it has a much smaller development-test gap;
-- its performance is more stable on unseen observations.
-
-However, the locked test set should not be repeatedly used for model selection.
-
-The next stage of the project introduces cross-validation so that model and preprocessing decisions can be evaluated using the development set without repeatedly consulting the locked test set.
-
----
-
-# Fairness Check
-
-The pipeline also reports the false-positive rate (FPR) by race.
-
-For the current Logistic Regression model:
-
-| Race | FPR |
-|---|---:|
-| African-American | 0.28 |
-| Asian | 0.00 |
-| Caucasian | 0.14 |
-| Hispanic | 0.11 |
-| Native American | 0.00 |
-| Other | 0.19 |
-
-For comparison, COMPAS's own score produced:
-
-| Race | FPR |
-|---|---:|
-| African-American | 0.44 |
-| Asian | 0.00 |
-| Caucasian | 0.24 |
-| Hispanic | 0.16 |
-| Native American | 1.00 |
-| Other | 0.20 |
-
-The results show that false-positive rates differ across racial groups.
-
-However, some groups have extremely small sample sizes in the relevant subset, particularly Asian and Native American observations, so those individual rates should not be interpreted as stable estimates.
-
-The fairness analysis is therefore an audit of model behaviour rather than a complete fairness assessment.
-
----
-
-# Project Description
-
-This project is a small but complete predictive machine-learning pipeline.
-
-The task is to predict two-year recidivism using ProPublica's COMPAS dataset.
-
-The project progressively develops a realistic predictive workflow containing:
-
-- configuration;
-- data loading;
-- cleaning;
-- preprocessing;
-- model construction;
-- evaluation;
-- fairness auditing;
-- result persistence.
-
-The pipeline intentionally begins simple and becomes more robust throughout the semester.
-
-See:
-
-```text
-data/README.md
-```
-
-for the full dataset description and data dictionary.
-
----
-
-# Project Structure
-
-```text
 .
-├── main.py                  # pipeline entry point
-├── config.yaml              # configuration and modelling choices
+├── main.py                  # entry point: run the whole pipeline
+├── config.yaml               # all tunable settings live here
 ├── requirements.txt
 ├── src/
-│   ├── data.py              # data loading
-│   ├── preprocessing.py     # cleaning, duplicates, feature split,
-│   │                        # preprocessing and dev/test split
-│   ├── model.py             # model construction
-│   ├── evaluate.py          # performance and fairness evaluation
-│   └── results.py           # saves run reports
-├── results/                 # generated run reports
+│   ├── data.py               # loading
+│   ├── preprocessing.py      # row-preserving cleaning (incl. domain-rule checks), training-only de-duplication, deployable preprocessing pipeline, and the split that locks the final test set away (week 4)
+│   ├── model.py               # model construction + build_pipeline(): preprocessing + model as one estimator (week 5)
+│   ├── evaluate.py           # stratified k-fold cross-validation, out-of-fold report + fairness check (week 4)
+│   ├── tuning.py             # hyperparameter tuning with Optuna + nested cross-validation (week 5)
+│   └── results.py            # saves each run's report to disk
+├── results/                  # created automatically -- one file per run (not tracked in git)
 └── data/
     ├── compas_two_year_recidivism.csv
-    └── README.md
+    └── README.md              # problem description + full data dictionary
 ```
 
-`src/data_diagnostics.py` was used during the Week 3 diagnostic stage.
+## Pipeline progress
 
-From Week 4 onward, the reusable cleaning rule `flag_invalid_values()` lives inside `src/preprocessing.py`, while the exploratory diagnostic functions are no longer required by the production pipeline.
+This table is updated after each practical class, so you can always see what changed in the pipeline and why -- it's a running log, not a fixed syllabus.
 
----
+| Week | Practical class focus | Added to the pipeline |
+|------|------------------------|------------------------|
+| 2 | Introduction & baseline pipeline | Initial version: project structure, a single naive train/test split (no cross-validation), minimal preprocessing (drop rows with missing values, one-hot encode categoricals), logistic regression baseline, a first (deliberately simple) fairness check comparing our model's and COMPAS's own false-positive rate by race, train-vs-test accuracy reporting (to start spotting overfitting), and each run's full report saved automatically to `results/` |
+| 3 | EDA + preprocessing -- diagnose the data, then fix it | `src/data_diagnostics.py` (missingness-mechanism test via chi-square + Cramér's V, domain-rule invalid-value detection, two-way duplicate check) and `src/preprocessing.py` (leak-safe category cleanup, mechanism-matched imputation with `_was_missing` indicators for MNAR columns, a deployable `ColumnTransformer`, **and** the train/test split itself, all in the one file rather than split across two) replace the old naive `dropna()`/`pd.get_dummies()` preprocessing; encoder/scaler pair (target encoding + standard scaling) chosen by an empirical grid over 15 repeated splits, checked against the runner-up with a paired comparison so the win isn't just noise; three redundant columns (found via correlation + VIF) dropped; `config.yaml` gains `diagnostics` and `preprocessing` sections -- see "Preprocessing decisions" below. Threshold-independent metrics (ROC-AUC/PR-AUC) and a calibration check are deliberately **not** added yet -- not yet |
+| 4 | Preprocessing inside the pipeline + cross-validation -- evaluating a model honestly | A **locked final test set** (20%, stratified, seed 42) is set aside by `split_dev_test()` (replaces `split_train_test()`) and never scored; models are now judged by **stratified 5-fold cross-validation** of the whole pipeline (preprocessing + model) on the development set, reported per fold with mean ± std and the train-validation gap; the classification report and fairness check now use out-of-fold predictions; target encoding switched to scikit-learn's cross-fitting `TargetEncoder` (a row's own label never leaks into its own encoding), encoder/scaler set by hand in `config.yaml` (target encoding + robust scaling, reasons in the comments); **two fixes** in `clean_dataset()`: genuine `NaN`s in categorical columns were being turned into the string `"nan"` (a fake category), so 229 `c_charge_degree` gaps were never imputed or flagged -- fixed in `config.yaml` alone: `"nan"` added to `diagnostics.placeholder_tokens` (the category cleanup's last step turns listed tokens into `NaN`, after its text conversion); and it no longer drops rows -- de-duplication moved to a separate, training-only `drop_duplicate_rows()` (run before the dev/test split), so the same cleaning can run on new data where every row needs a prediction; `src/data_diagnostics.py` removed -- its one cleaning function (`flag_invalid_values`) moved into `preprocessing.py`, and the EDA-only checks (missingness test, duplicate counts) live in the EDA notebooks, not in every pipeline run; `dummy` (majority-class) model added as the floor to beat, and `random_forest` registered (sensible defaults, untuned); the final model is refit on the whole development set after CV; `config.yaml` gains `test_set` and `cv` sections -- see "Model evaluation" below |
+| 5 | Hyperparameter tuning without leakage | New `src/tuning.py`: hyperparameters are tuned with **Optuna** (seeded TPE sampler) on the development set only -- every candidate is scored by stratified 5-fold CV of the **whole** pipeline (preprocessing re-fit in every fold of every trial), on the same folds for every candidate; the tuning procedure is estimated honestly by **nested cross-validation** (the tuning repeated inside each outer CV fold, scored on the outer fold it never saw), whose out-of-fold predictions now feed the classification report and fairness check; the reported "best trial" score is shown next to the nested one as an optimism check; the final model is the tuned pipeline refit on all development rows; `build_pipeline()` in `src/model.py` now builds the preprocessing + model `Pipeline` (one place to add a learned step later); `config.yaml` gains a `tuning` section (on/off, trials, inner folds, seed, one search space per model type) and the model becomes the decision tree; `optuna` added to `requirements.txt`. The locked test set is still untouched -- see "Hyperparameter tuning" below |
 
-# Pipeline Progress
+## Preprocessing decisions
 
-| Week | Practical focus | Main pipeline changes |
-|---|---|---|
-| 2 | Introduction and baseline pipeline | Initial runnable pipeline, simple train/test split, Logistic Regression baseline, Decision Tree comparison, classification report, fairness FPR report and saved results |
-| 3 | EDA and data diagnosis | Missingness investigation, invalid-value rules, categorical canonicalisation, duplicate diagnosis, multicollinearity analysis, mechanism-matched imputation and missingness indicators |
-| 4 | Leak-safe preprocessing | `clean_dataset()` becomes row-preserving; `drop_duplicate_rows()` becomes a separate training-only operation; `split_dev_test()` creates development and locked test sets; sklearn `TargetEncoder` with stratified cross-fitting; Robust Scaling; `data_diagnostics.py` removed from the runtime pipeline; Dummy and Random Forest model options added |
+*(Written straight from the diagnosis in `Practical/W3/notebooks/01_eda_introduction.ipynb`; the preprocessing walkthrough is in `Practical/W4/notebooks/02_preprocessing.ipynb`. This is the summary.)*
 
----
+| Column(s) | Issue found | Mechanism | What was done |
+|---|---|---|---|
+| `age` | 2.0% missing | MCAR | median impute, no indicator needed |
+| `juv_fel_count` | 3.0% missing | MCAR | median impute, no indicator needed |
+| `priors_count` | ~7% missing (incl. placeholder tokens) | MNAR -- tied to `age_cat` | median impute + `priors_count_was_missing` flag |
+| `c_charge_degree` | 3.2% missing | MNAR -- tied to `age_cat` | mode impute + `c_charge_degree_was_missing` flag |
+| `race` | ~1% missing (placeholder tokens) | MCAR | mode impute, no indicator (excluded from model features anyway) |
+| `sex` | ~1.5% missing (incl. placeholder tokens) | MCAR | mode impute, no indicator needed |
+| `age`, `decile_score`, `juv_fel_count`, `priors_count` | invalid values (out-of-range or negative) | domain rule | converted to `NaN` before imputation |
+| `sex` / `race` / `c_charge_degree` / `score_text` | inconsistent category spelling (casing, whitespace, abbreviations) | data entry | canonicalized to one spelling per category |
+| whole rows | 72 exact-duplicate rows, all sharing a repeated `id` | data entry | dropped, kept first occurrence |
+| `prior_offenses`, `age_in_months`, `juvenile_total` | redundant with other columns (correlation r=1.00, or -- for `juvenile_total` -- an exact sum caught only by VIF) | multicollinearity | dropped |
 
-# Current Configuration
+**Encoder/scaler pair:** chosen by hand in `config.yaml` -- **target encoding** (compact, informative and **robust scaling** (median/IQR, so the few extreme counts don't set the scale). The alternatives (`onehot`/`ordinal`/`count`, `none`/`standard`/`minmax`) are one config change away.
 
-The current principal preprocessing configuration is:
 
-```yaml
-preprocessing:
-  encoder: "target"
-  scaler: "robust"
-  random_state: 42
+## Hyperparameter tuning
 
-  numeric_features:
-    - age
-    - juv_fel_count
-    - juv_misd_count
-    - juv_other_count
-    - priors_count
+*(Walkthrough: `Practical/W5/notebooks/04_hyperparameter_tuning.ipynb`.)* With `tuning.enabled: true` in `config.yaml`, `python main.py` also:
 
-  categorical_features:
-    - sex
-    - age_cat
-    - c_charge_degree
+1. **Nested cross-validation** -- for each of the 5 outer CV folds, runs a full Optuna study on the outer-training rows only (each trial = 5-fold CV of the whole pipeline), refits the best candidate on those rows and scores it on the outer-validation fold. This is the honest estimate of the tuned model.
+2. **Tuning on the whole development set** -- the same study, once, on every development row: these are the hyperparameters the final model uses.
 
-  mnar_indicator_sources:
-    - priors_count
-    - c_charge_degree
+The best trial's score is printed too, but it is **optimistic** (the maximum of many noisy CV scores) -- report the nested one. Search spaces live in `config.yaml` under `tuning.search_spaces`, one per model type, keyed by Pipeline parameter name (`model__max_depth`); a model without a search space can't be tuned until you add one. Cost: `(cv.n_splits + 1) x n_trials x tuning.n_splits` fits.
 
-  imputation:
-    numeric_strategy: "median"
-    categorical_strategy: "most_frequent"
-```
+## Environment setup
 
-The current baseline model is:
+You only need to do this once per machine.
 
-```yaml
-model:
-  type: "logistic_regression"
-
-  params:
-    max_iter: 2000
-```
-
----
-
-# Environment Setup
-
-You only need to create the virtual environment and install the dependencies once per machine.
-
-## macOS / Linux
-
+### macOS / Linux
 ```bash
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
+python3 -m venv venv                 # creates an isolated Python environment in a folder called "venv"
+source venv/bin/activate             # activates it -- packages install here, not system-wide, and stay out of your other projects
+pip install -r requirements.txt      # installs the exact packages this project needs, into that environment
 ```
 
-## Windows -- PowerShell
-
+### Windows -- PowerShell
 ```powershell
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
+python -m venv venv                  # creates an isolated Python environment in a folder called "venv"
+venv\Scripts\activate                # activates it -- packages install here, not system-wide, and stay out of your other projects
+pip install -r requirements.txt      # installs the exact packages this project needs, into that environment
 ```
-
-If PowerShell blocks the activation script:
-
+If PowerShell blocks the activation script, run this once first:
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 ```
 
-Then activate the environment again:
-
-```powershell
-venv\Scripts\activate
-```
-
-## Windows -- cmd.exe
-
+### Windows -- cmd.exe
+Same three steps as above, just with cmd's own activation command:
 ```cmd
 python -m venv venv
 venv\Scripts\activate.bat
 pip install -r requirements.txt
 ```
 
-When the environment is active, the terminal prompt should begin with:
+Once the environment is active you'll see `(venv)` at the start of your prompt. To leave it later, run `deactivate` (same command on every OS).
 
-```text
-(venv)
-```
+### Every time after the first
 
----
+Creating the environment and installing packages only needs to happen once, ever. Every other time you sit down to work -- a new terminal window, the next practical class, tomorrow -- you don't repeat any of the steps above. From the project's root folder, you just need to:
 
-# Every Time You Return to the Project
-
-You do not need to recreate the environment.
-
-On Windows:
-
-```powershell
-venv\Scripts\activate
-python main.py
-```
-
-On macOS/Linux:
-
+**macOS / Linux**
 ```bash
 source venv/bin/activate
 python main.py
 ```
 
----
+**Windows**
+```powershell
+venv\Scripts\activate
+python main.py
+```
 
-# Environment Troubleshooting
+That's it -- activate, then run.
 
-## PowerShell blocks activation
+**When `requirements.txt` changes** (a week adds a package -- e.g. week 5 adds `optuna`), reinstall once, with the venv active: `pip install -r requirements.txt`. Otherwise `python main.py` fails with `ModuleNotFoundError`. If you don't see `(venv)` at the start of your prompt, the environment isn't active and `python main.py` may use the wrong Python (or fail to find a package) entirely.
 
-If PowerShell repeatedly blocks the activation script, you can run:
+## Environment Troubleshooting
 
+Two Windows issues come up often enough to note here -- if you hit either, this saves you re-diagnosing it from scratch.
+
+**PowerShell blocks the venv activation script, every new terminal.** The `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` line above only fixes it for that one terminal window -- close it and it's back. For a fix that actually sticks across sessions, run this **once**, instead:
 ```powershell
 Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ```
+If it still doesn't stick (common on locked-down school/lab machines with a Group Policy that resets it on every logon), skip PowerShell entirely: use **Git Bash** (`source venv/Scripts/activate`) or **cmd.exe** (`venv\Scripts\activate.bat`) instead -- neither is affected by PowerShell's execution policy.
 
-On restricted machines, Git Bash or `cmd.exe` can also be used.
+**Windows blocks the terminal/Python from reading or writing files in Documents (or Desktop/Pictures).** Shows up as an "Access is denied" error, or a silent failure to create/update a file, only when the project sits inside one of those folders. Two independent settings can cause this -- check both:
+- **Windows Security -> Virus & threat protection -> Manage ransomware protection** -- turn off **Controlled folder access**, or add your terminal/Python/editor to its allowed-apps list.
+- **Settings -> Privacy & security -> File system** -- make sure the terminal/Python has access.
 
----
+## Running the pipeline
 
-## File Access Problems on Windows
-
-If Windows blocks Python or the terminal from accessing files in Desktop, Documents or Pictures, check:
-
-```text
-Windows Security
--> Virus & threat protection
--> Manage ransomware protection
-```
-
-and:
-
-```text
-Settings
--> Privacy & security
--> File system
-```
-
----
-
-# Running the Pipeline
-
-With the virtual environment active, run:
-
+With the environment active (see above), from the project's root
+folder, on any OS:
 ```bash
 python main.py
 ```
 
-The pipeline performs the following steps:
+This loads `config.yaml`, diagnoses and cleans the data (week 3), locks the final test set away, cross-validates preprocessing + model on the development set (week 4), tunes the model's hyperparameters if `tuning.enabled` is on (week 5 -- see "Hyperparameter tuning" above), and prints:
+- **a per-fold cross-validation table** -- train and validation accuracy for each of the 5 folds, the gap between them, and their mean ± std. Comparing train and validation is how you catch overfitting: if the model looks much better on the data it was trained on than on data it's never seen, it has memorised rather than learned something that generalises.
+- with tuning on: the nested cross-validation table (the honest score of the tuned model, and the hyperparameters chosen in each fold), and the tuning report (best hyperparameters, top trials, and the optimism check)
+- a classification report on the out-of-fold predictions (from nested CV when tuning is on)
+- a false-positive-rate-by-race comparison between our model and COMPAS's own score (same rows)
+- the final model -- the same pipeline (tuned, if tuning is on) refit on all development rows (CV estimated how good it is; this is the model itself)
+- a reminder of how many rows are in the locked test set -- which is **not** evaluated
 
-```text
-load config
-    ↓
-load raw data
-    ↓
-row-preserving cleaning
-    ↓
-training-only duplicate removal
-    ↓
-features / target / audit columns
-    ↓
-development / locked test split
-    ↓
-preprocessing pipeline
-    ↓
-model
-    ↓
-predictions
-    ↓
-performance evaluation
-    ↓
-fairness report
-    ↓
-save results
-```
+All of this is also saved to a timestamped file in `results/` (e.g.`results/run_20260916_143012.txt`), so it doesn't just scroll past in your terminal -- open it later, or change something in `config.yaml` (like the model type) and compare the new file to the last one.
+`results/` is created automatically the first time you run the
+pipeline, and isn't tracked in git (see `.gitignore`) since it's
+generated output, not source.
 
-The terminal prints:
+You're free to improve on this structure or restructure it entirely -- what matters is that your project stays runnable end-to-end with a single command, and that each piece (data, preprocessing, model, evaluation) stays easy to find and change independently.
 
-- development/train accuracy;
-- locked test accuracy;
-- development-test gap;
-- classification report;
-- false-positive rate by race;
-- COMPAS comparison.
+## Push to GitHub via Terminal
 
-The complete output is also saved automatically to:
-
-```text
-results/
-```
-
-For example:
-
-```text
-results/run_20261001_193930.txt
-```
-
-The `results/` directory contains generated outputs and is not intended to be part of the source code.
-
----
-
-# Changing Models
-
-The model can be changed directly in `config.yaml`.
-
-## Logistic Regression
-
-```yaml
-model:
-  type: "logistic_regression"
-  params:
-    max_iter: 2000
-```
-
-## Decision Tree
-
-```yaml
-model:
-  type: "decision_tree"
-  params: {}
-```
-
-## Random Forest
-
-```yaml
-model:
-  type: "random_forest"
-  params: {}
-```
-
-## Dummy Classifier
-
-```yaml
-model:
-  type: "dummy"
-  params: {}
-```
-
-Model-specific parameters must only be supplied to models that support them.
-
-For example:
-
-```text
-max_iter
-```
-
-is a Logistic Regression parameter and should not be passed to the Decision Tree.
-
----
-
-# Git Workflow
-
-From the project root:
-
+Standard workflow, from the project's root folder, with the venv active:
 ```bash
-git status
 git add .
 git commit -m "short description of what changed"
 git push
 ```
 
-Before committing, `git status` can be used to confirm exactly which files were changed, added or deleted.
+**If `git push` asks for a password and rejects your normal GitHub password:** GitHub no longer accepts account passwords for git over HTTPS -- you need a **Personal Access Token (PAT)** instead.
+1. On GitHub: **Settings -> Developer settings -> Personal access tokens -> Tokens (classic)** -> **Generate new token**, with at least `repo` scope.
+2. When `git push` prompts for a password, paste the token instead (username stays your GitHub username).
+3. So you're not asked every time: `git config --global credential.helper manager` (Windows, usually already set up by Git for Windows) or `git config --global credential.helper store` (caches it in plaintext -- fine on a personal machine, not a shared one).
 
----
+Alternative: set up an SSH key once (`ssh-keygen -t ed25519`, then add the public key under **GitHub -> Settings -> SSH and GPG keys**) and use the repo's SSH remote URL (`git@github.com:...`) instead of HTTPS -- no token to manage or renew.
 
-# Updating the Repository
+## Dataset
 
-When the professor updates the upstream repository, first update the fork and then pull the changes locally.
-
-Typical workflow:
-
-```bash
-git pull
-```
-
-Always check the current branch before working:
-
-```bash
-git branch
-```
-
-The active branch is marked with:
-
-```text
-*
-```
-
----
-
-# Dataset
-
-See:
-
-```text
-data/README.md
-```
-
-for the problem description and complete data dictionary.
-
----
-
-# Next Step
-
-The Week 4 pipeline now provides a leak-safe preprocessing recipe and a locked test set.
-
-The next stage is:
-
-```text
-03_cross_validation.ipynb
-```
-
-Cross-validation will allow model and preprocessing decisions to be evaluated using only the development set, without repeatedly using the locked test set for model selection.
+See `data/README.md`.
