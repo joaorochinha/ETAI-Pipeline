@@ -192,21 +192,3 @@ False positive rate (FPR) = share of people who did **not** reoffend but were pr
 ## Current best model
 
 The three tuned ensembles are tied (0.681–0.683). `config.yaml` runs the **Random Forest** (the course default this week): `n_estimators=200`, `max_depth=24`, `min_samples_leaf=45`, `max_features=0.5`, refitted on all 5771 development rows, nested CV accuracy **0.681 ± 0.015**. AdaBoost has the highest mean (0.683) but the difference is noise. Logistic Regression (0.673) is only one point lower and much easier to interpret.
-
-## How to run
-
-```bash
-python -m venv venv
-source venv/bin/activate          # Windows: .\venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-python main.py
-```
-
-Every run is saved to `results/run_<timestamp>.txt`, together with the config used. Other results come from changing `config.yaml`:
-- `model.type` and `model.params` (the params for each model are in the comments under `model:`);
-- `tuning.enabled: false` for default CV only;
-- `preprocessing.imputation.numeric_strategy: knn` (week 4 challenge);
-- `cv.scoring: balanced_accuracy` (week 5 challenge 4);
-- adding `priors_per_adult_year`, `has_juvenile_record`, `young_felony` to `preprocessing.numeric_features` (week 6 challenge 1).
-
-With tuning on, one run takes about 1 minute for Logistic Regression or the Decision Tree, about 6 minutes for the Random Forest or AdaBoost, and about 11 minutes for the oblique forest (2-core machine). Use a small `tuning.n_trials` while testing.
