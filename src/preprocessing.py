@@ -10,7 +10,7 @@ import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
-from sklearn.impute import SimpleImputer
+from sklearn.impute import SimpleImputer, KNNImputer
 from sklearn.model_selection import StratifiedKFold, train_test_split
 from sklearn.preprocessing import (
     OneHotEncoder, OrdinalEncoder, TargetEncoder, StandardScaler, MinMaxScaler, RobustScaler,
@@ -48,11 +48,34 @@ def _canonicalize_categories(df: pd.DataFrame, columns_and_maps: dict, placehold
     return out
 
 
+def apply_consistency_rules(df: pd.DataFrame, rules: dict) -> pd.DataFrame:
+    """
+    Week 3 challenge: a category must agree with the number it comes from (`age_cat` with
+    `age`, `score_text` with `decile_score`). Each rule in config.yaml gives the source column
+    and its bins (min included, max excluded). Wherever the source value is valid, the category
+    is recomputed from it, in place. A fixed rule: nothing is learned from the data.
+    Returns the number of corrected values per column.
+    """
+    report_rows = []
+    for column, rule in rules.items():
+        if column not in df.columns or rule["source"] not in df.columns:
+            continue
+        source = pd.to_numeric(df[rule["source"]], errors="coerce")
+        expected = pd.Series(np.nan, index=df.index, dtype=object)
+        for b in rule["bins"]:
+            expected[(source >= b["min"]) & (source < b["max"])] = b["label"]
+        wrong = expected.notna() & (df[column] != expected)
+        report_rows.append({"column": column, "corrected": int(wrong.sum())})
+        df.loc[wrong, column] = expected[wrong]
+    return pd.DataFrame(report_rows)
+
+
 def clean_dataset(df: pd.DataFrame, diagnostics_config: dict) -> pd.DataFrame:
     """
     Applies the cleaning rules in `diagnostics_config`: placeholder tokens and domain-rule
-    violations become NaN, category spellings are canonicalized and redundant columns are
-    dropped. Row-preserving and target-agnostic, so it runs unchanged on data to predict.
+    violations become NaN, category spellings are canonicalized, the consistency rules are
+    applied and redundant columns are dropped. Row-preserving and target-agnostic, so it runs
+    unchanged on data to predict.
     """
     out = df.copy()
     placeholder_tokens = set(diagnostics_config.get("placeholder_tokens", []))
@@ -63,6 +86,8 @@ def clean_dataset(df: pd.DataFrame, diagnostics_config: dict) -> pd.DataFrame:
 
     flag_invalid_values(out, diagnostics_config.get("validity_rules", {}))
     out = _canonicalize_categories(out, diagnostics_config.get("canonical_categories", {}), placeholder_tokens)
+    # after the two steps above: an invalid age is already NaN, and "LOW" is already "Low"
+    apply_consistency_rules(out, diagnostics_config.get("consistency_rules", {}))
 
     columns_to_drop = [c for c in diagnostics_config.get("redundant_columns", []) if c in out.columns]
     return out.drop(columns=columns_to_drop)
@@ -76,6 +101,28 @@ def drop_duplicate_rows(df: pd.DataFrame, id_column: str = None) -> pd.DataFrame
     out = df.drop_duplicates()
     if id_column and id_column in out.columns:
         out = out.drop_duplicates(subset=id_column, keep="first")
+    return out
+
+
+def add_engineered_features(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Week 6 challenge 1: new columns from fixed formulas. Nothing is learned from the data,
+    so this is safe before the split and on new data. A NaN input gives a NaN output, which
+    the imputer fills later. A column is only used by the model if it is listed in
+    `preprocessing.numeric_features` in config.yaml.
+      - priors_per_adult_year: prior offences per year since turning 18 (the notebook's example)
+      - has_juvenile_record: 1 if the person has any juvenile offence, else 0
+      - young_felony: 1 if the person is under 25 AND the current charge is a felony, else 0
+    """
+    out = df.copy()
+    out["priors_per_adult_year"] = out["priors_count"] / (out["age"] - 17).clip(lower=1)
+
+    juvenile_sum = out["juv_fel_count"] + out["juv_misd_count"] + out["juv_other_count"]
+    out["has_juvenile_record"] = (juvenile_sum > 0).astype(float).where(juvenile_sum.notna())
+
+    young = out["age_cat"] == "Less than 25"
+    felony = out["c_charge_degree"] == "F"
+    out["young_felony"] = (young & felony).astype(float).where(out["c_charge_degree"].notna())
     return out
 
 
@@ -129,10 +176,19 @@ def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
     scaler = scaler_factory() if callable(scaler_factory) else scaler_factory
     encoder = _ENCODERS[preprocessing_config["encoder"]](preprocessing_config.get("random_state"))
 
-    numeric_pipeline = Pipeline([
-        ("impute", SimpleImputer(strategy=imputation.get("numeric_strategy", "median"))),
-        ("scale", scaler),
-    ])
+    numeric_strategy = imputation.get("numeric_strategy", "median")
+    if numeric_strategy == "knn":
+        # Week 4 challenge: KNN fills a gap from the most similar rows. It measures distances,
+        # so the columns are scaled first (sklearn's scalers ignore NaN when fitting).
+        numeric_pipeline = Pipeline([
+            ("scale", scaler),
+            ("impute", KNNImputer(n_neighbors=imputation.get("knn_neighbors", 5))),
+        ])
+    else:
+        numeric_pipeline = Pipeline([
+            ("impute", SimpleImputer(strategy=numeric_strategy)),
+            ("scale", scaler),
+        ])
     categorical_pipeline = Pipeline([
         ("impute", SimpleImputer(strategy=imputation.get("categorical_strategy", "most_frequent"))),
         ("encode", encoder),

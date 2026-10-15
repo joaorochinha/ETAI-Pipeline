@@ -4,7 +4,7 @@ out-of-fold reports and a fairness check. The locked test set is never used here
 """
 import numpy as np
 import pandas as pd
-from sklearn.metrics import classification_report
+from sklearn.metrics import balanced_accuracy_score, classification_report
 from sklearn.model_selection import cross_validate
 
 
@@ -52,9 +52,13 @@ def cv_report(fold_scores: pd.DataFrame, scoring: str = "accuracy") -> str:
 
 
 def oof_classification_report(y_true, y_pred) -> str:
-    """Classification report on the out-of-fold predictions, as text (printed and returned)."""
+    """
+    Classification report on the out-of-fold predictions, plus balanced accuracy (the mean
+    of the recall of the two classes), as text (printed and returned).
+    """
     text = "Classification report (out-of-fold predictions, development set):\n" + \
-        classification_report(y_true, y_pred, zero_division=0)
+        classification_report(y_true, y_pred, zero_division=0) + \
+        f"\nBalanced accuracy = {balanced_accuracy_score(y_true, y_pred):.3f}\n"
     print(text)
     return text
 

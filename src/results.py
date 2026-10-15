@@ -2,11 +2,14 @@
 import os
 from datetime import datetime
 
+import yaml
+
 
 def save_run(results_dir: str, config: dict, report_text: str) -> str:
     """
-    Writes the run's settings and full report to `results_dir/run_<timestamp>.txt` (the
-    folder is created if needed) and returns the path.
+    Writes the run's settings, full report and a copy of the whole config used to
+    `results_dir/run_<timestamp>.txt` (the folder is created if needed) and returns the path.
+    The config copy makes every number in the README traceable to the exact settings.
     """
     os.makedirs(results_dir, exist_ok=True)
 
@@ -21,7 +24,8 @@ def save_run(results_dir: str, config: dict, report_text: str) -> str:
         f"Run: {timestamp}\n"
         f"Model: {config['model']['type']}  params={config['model'].get('params')}\n"
         f"Preprocessing: encoder={config['preprocessing']['encoder']}  "
-        f"scaler={config['preprocessing']['scaler']}\n"
+        f"scaler={config['preprocessing']['scaler']}  "
+        f"numeric imputation={config['preprocessing'].get('imputation', {}).get('numeric_strategy', 'median')}\n"
         f"CV: {cv['n_splits']} stratified folds  shuffle={cv.get('shuffle', True)}  "
         f"random_state={cv.get('random_state')}  metric={cv.get('scoring', 'accuracy')}\n"
         f"Tuning: {tuning_line}\n"
@@ -32,4 +36,6 @@ def save_run(results_dir: str, config: dict, report_text: str) -> str:
 
     with open(path, "w") as f:
         f.write(header + report_text)
+        f.write("\n" + "=" * 60 + "\nConfig used for this run:\n\n")
+        f.write(yaml.safe_dump(config, sort_keys=False, allow_unicode=True))
     return path
